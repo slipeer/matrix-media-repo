@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sebest/xff"
 	"github.com/sirupsen/logrus"
 	"github.com/turt2live/matrix-media-repo/api"
 	"github.com/turt2live/matrix-media-repo/api/r0"
@@ -21,6 +20,18 @@ type handler struct {
 	reqCounter *requestCounter
 }
 
+var loopback = net.IPNet{IP: net.IPv4(127, 0, 0, 0), Mask: net.IPv4Mask(255, 0, 0, 0)}
+
+func XffParse(xff string) string {
+    for _, ip := range strings.Split(xff, ",") {
+	ip = strings.TrimSpace(ip)
+	if IP := net.ParseIP(ip); IP != nil && !loopback.Contains(IP) {
+	    return ip
+	}
+    }
+    return ""
+}
+
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	isUsingForwardedHost := false
 	if r.Header.Get("X-Forwarded-Host") != "" {
@@ -29,13 +40,12 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Host = strings.Split(r.Host, ":")[0]
 
-	raddr := xff.GetRemoteAddr(r)
-	host, _, err := net.SplitHostPort(raddr)
-	if err != nil {
-		logrus.Error(err)
-		host = raddr
+	if r.Header.Get("X-Forwarded-For") != "" {
+		raddr := XffParse(r.Header.Get("X-Forwarded-For"))
+		if raddr != "" {
+			r.RemoteAddr = raddr
+		}
 	}
-	r.RemoteAddr = host
 
 	contextLog := logrus.WithFields(logrus.Fields{
 		"method":             r.Method,
